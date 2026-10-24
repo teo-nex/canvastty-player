@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT if (ROOT / "canvastty.plugin.json").is_file() else ROOT / "package"
 ORIGIN = "https://music.deploychan.webcam"
 PLUGIN_ID = "webcam.deploychan.music"
+VERSION = "1.1.0"
 
 
 def package_files():
@@ -114,12 +115,12 @@ def main():
     (PACKAGE / "index.html").write_text(html)
 
     manifest = {
-        "apiVersion": 1, "id": PLUGIN_ID, "name": "Canvas Player", "version": "1.0.0",
-        "description": "Плеер music.deploychan.webcam в отдельном окне CanvasTTY. Музыка загружается с исходного сайта.",
+        "apiVersion": 1, "id": PLUGIN_ID, "name": "Canvas Player", "version": VERSION,
+        "description": "Музыкальный плеер на канвасе CanvasTTY рядом с терминалами. Музыка загружается с music.deploychan.webcam.",
         "platforms": ["canvastty"], "minHostVersion": "1.8.1", "icon": "icon.svg",
         "permissions": ["network", "storage"],
         "contributions": [
-            {"id": "player", "kind": "window", "title": "Canvas Player", "entry": "index.html", "defaultSize": {"width": 1100, "height": 760}, "minSize": {"width": 380, "height": 560}},
+            {"id": "player", "kind": "canvas-app", "title": "Canvas Player", "entry": "index.html", "defaultSize": {"width": 1100, "height": 760}, "minSize": {"width": 380, "height": 560}},
             {"id": "launcher", "kind": "home-widget", "title": "Canvas Player", "entry": "launcher.html", "defaultSize": {"columns": 4, "rows": 2}},
         ],
     }
@@ -135,7 +136,7 @@ def main():
     files = package_files()
     if len(files) > 500 or sum(p.stat().st_size for p in files) > 25 * 1024 * 1024:
         raise ValueError("Package exceeds CanvasTTY's installation limits")
-    archive = ROOT / "deploychan-music-1.0.0.zip"
+    archive = ROOT / f"deploychan-music-{VERSION}.zip"
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as out:
         for path in sorted(files):
             out.write(path, path.relative_to(PACKAGE))

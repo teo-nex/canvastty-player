@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from urllib.parse import urlsplit, unquote
 import zipfile
-from build import ROOT, PACKAGE, package_files
+from build import ROOT, PACKAGE, VERSION, package_files
 
 class Page(HTMLParser):
     def handle_starttag(self, tag, attrs):
@@ -31,6 +31,13 @@ def main():
     files = package_files()
     manifest = json.loads((PACKAGE / "canvastty.plugin.json").read_text())
     assert manifest["id"] == "webcam.deploychan.music"
+    assert manifest["version"] == VERSION
+    player = next(c for c in manifest["contributions"] if c["id"] == "player")
+    assert player["kind"] == "canvas-app", "The full player must live on the shared canvas"
+    assert not any(c["kind"] == "window" for c in manifest["contributions"])
+    launcher = (PACKAGE / "launcher.js").read_text()
+    assert 'request("canvas.open", { contributionId: "player" })' in launcher
+    assert "window.open" not in launcher
     assert set(manifest["permissions"]) == {"storage", "network"}
     assert not manifest.get("hooks") and not manifest.get("services")
     assert 0 < len(files) <= 500
@@ -46,7 +53,7 @@ def main():
         assert sha256(path.read_bytes()).hexdigest() == asset["packagedSha256"], path
     for path in PACKAGE.rglob("*.js"):
         assert "createMediaElementSource" not in path.read_text(), path
-    archive = ROOT / "deploychan-music-1.0.0.zip"
+    archive = ROOT / f"deploychan-music-{VERSION}.zip"
     if archive.exists():
         with zipfile.ZipFile(archive) as bundle:
             assert not bundle.testzip()
