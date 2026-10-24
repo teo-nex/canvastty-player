@@ -1,0 +1,887 @@
+From a9458d066ebdd18b1c216ca996f822167e84e530 Mon Sep 17 00:00:00 2001
+From: teo-nex <314265484+teo-nex@users.noreply.github.com>
+Date: Sun, 25 Oct 2026 02:27:49 +0300
+Subject: [PATCH] Apply selected terminal frames to plugin canvas cards
+
+---
+ .../src/features/plugins/PluginCanvasCard.tsx | 84 ++++++++++++++-----
+ .../features/workspace/WorkspaceCanvas.tsx    |  2 +
+ src/renderer/src/lib/skinStyles.ts            |  8 +-
+ src/renderer/src/styles/app.css               |  3 +-
+ src/renderer/src/styles/mascots.css           |  1 +
+ .../src/styles/ornateTerminalSkins.css        | 72 ++++++++--------
+ .../src/styles/pixelTerminalSkins.css         | 74 ++++++++--------
+ src/renderer/src/styles/terminalSkins.css     | 30 +++----
+ tests/helpers/fake-react.mjs                  |  7 ++
+ tests/pixel-skin-engine.test.mjs              | 22 ++---
+ tests/plugin-frame-visibility.test.mjs        | 23 ++++-
+ tests/terminal-border-skins-renderer.test.mjs |  3 +-
+ 12 files changed, 206 insertions(+), 123 deletions(-)
+
+diff --git a/src/renderer/src/features/plugins/PluginCanvasCard.tsx b/src/renderer/src/features/plugins/PluginCanvasCard.tsx
+index 57303ab..a375928 100644
+--- a/src/renderer/src/features/plugins/PluginCanvasCard.tsx
++++ b/src/renderer/src/features/plugins/PluginCanvasCard.tsx
+@@ -8,6 +8,8 @@ import type {
+   PluginCanvasAppContribution,
+   PluginCanvasInstance,
+   Point,
++  PixelSkinPreferredDetail,
++  TerminalBorderSkinId,
+   ProviderId,
+   SessionBounds,
+   SessionSnapshot
+@@ -21,12 +23,20 @@ import type { PluginCanvasWheelInput } from "./pluginInputBridge";
+ import { pluginCanvasWidgetId } from "../workspace/canvasWidgetFocus";
+ import { surfaceIsLive, surfaceLifecycle, useSurfaceOffscreen, useWindowHidden } from "../workspace/surfaceLifecycle";
+ 
++import { isCustomTerminalBorderSkinId, terminalBorderSkinFallback } from "../../lib/skinStyles";
++import { Canvas2DSkinView } from "../skins/Canvas2DSkinView";
++import { isPixelSkinThemeId } from "../skins/skinCatalog";
++import { isPixelSkinPackId, usePixelSkinPackSummary } from "../skins/SkinAssets";
++import { pixelSkinSurfaceBounds, skinDetailLevel } from "../skins/SkinLayout";
++
+ interface PluginCanvasCardProps {
+   instance: PluginCanvasInstance;
+   plugin: InstalledPlugin;
+   contribution: PluginCanvasAppContribution;
+   locale: LocaleId;
+   palette: PaletteId;
++  borderSkin: TerminalBorderSkinId;
++  skinDetail: PixelSkinPreferredDetail;
+   /** The canvas camera: drags read its zoom when they move; rendering subscribes to what it needs. */
+   camera: CameraStore;
+   stackIndex: number;
+@@ -70,6 +80,8 @@ export function PluginCanvasCard({
+   contribution,
+   locale,
+   palette,
++  borderSkin: selectedBorderSkin,
++  skinDetail,
+   camera,
+   stackIndex,
+   snapEnabled,
+@@ -92,12 +104,22 @@ export function PluginCanvasCard({
+   const mascotDragState = useRef<DragState | null>(null);
+   const resizeState = useRef<ResizeState | null>(null);
+   const isMascot = plugin.sourceUrl.startsWith("mascot:");
++  // Mascots keep their transparent, frameless canvas presentation.
++  const borderSkin = isMascot ? undefined : terminalBorderSkinFallback(selectedBorderSkin);
++  const customBorderSkin = !isMascot && isCustomTerminalBorderSkinId(selectedBorderSkin) ? selectedBorderSkin : undefined;
++  const pixelSkinTheme = isPixelSkinThemeId(borderSkin) || isPixelSkinPackId(borderSkin) ? borderSkin : null;
++  const pixelPack = usePixelSkinPackSummary(pixelSkinTheme && isPixelSkinPackId(pixelSkinTheme) ? pixelSkinTheme : null);
+   const mascotAspectRatio = contribution.defaultSize.width / contribution.defaultSize.height;
+   const initialBounds = isMascot
+     ? fitMascotBounds({ position: instance.position, size: instance.size }, mascotAspectRatio)
+     : constrainPluginResize({ position: instance.position, size: instance.size }, "se", contribution.minSize);
+   const [position, setPosition] = useState(initialBounds.position);
+   const [size, setSize] = useState(initialBounds.size);
++  const pixelDetail = pixelSkinTheme ? skinDetailLevel(skinDetail, false) : "minimal";
++  const pixelSurfaceBounds = pixelSkinTheme
++    ? pixelSkinSurfaceBounds(pixelSkinTheme, pixelDetail, size.width, size.height, 26,
++      pixelPack?.apertures[pixelDetail] ?? pixelPack?.aperture)
++    : null;
+   const liveBounds = useRef<SessionBounds>(initialBounds);
+   // Renders when the summary scale changes, not on every camera move.
+   const summaryScale = useCameraSelector(camera, (current) => summaryScaleForZoom(current.zoom));
+@@ -256,6 +278,9 @@ export function PluginCanvasCard({
+   return (
+     <article
+       className={`plugin-canvas-card ${isMascot ? "plugin-canvas-card--mascot" : ""} ${summaryMode ? "plugin-canvas-card--summary" : ""} ${groupSelected ? "plugin-canvas-card--selected" : ""}`}
++      data-border-skin={borderSkin}
++      data-custom-border-skin={customBorderSkin}
++      data-pixel-skin={pixelSkinTheme ? "true" : undefined}
+       data-interactive="true"
+       data-canvas-layer-id={`plugin:${instance.id}`}
+       data-canvas-widget-id={pluginCanvasWidgetId(instance.id)}
+@@ -267,11 +292,15 @@ export function PluginCanvasCard({
+         height: size.height,
+         zIndex: stackIndex,
+         transform: `translate(${position.x}px, ${position.y}px)`,
+-        "--summary-scale": summaryScale
++        "--summary-scale": summaryScale,
++        "--pixel-skin-left-inset": `${pixelSurfaceBounds?.left ?? 28}px`,
++        "--pixel-skin-right-inset": `${size.width - (pixelSurfaceBounds?.right ?? (size.width - 28))}px`,
++        "--pixel-skin-top-inset": `${pixelSurfaceBounds?.top ?? 70}px`,
++        "--pixel-skin-bottom-inset": `${size.height - (pixelSurfaceBounds?.bottom ?? (size.height - 58))}px`
+       } as React.CSSProperties}
+     >
+       <header
+-        className="plugin-canvas-card__header"
++        className={`plugin-canvas-card__header ${isMascot ? "" : "terminal-card__header"}`}
+         onPointerDown={startDrag}
+         onPointerMove={drag}
+         onPointerUp={endDrag}
+@@ -283,33 +312,44 @@ export function PluginCanvasCard({
+           <UiIcon name="close" size="1.23em" />
+         </button>
+       </header>
+-      <PluginFrame
+-        key={plugin.selectedModules.join(",")}
+-        className="plugin-canvas-card__frame"
+-        plugin={plugin}
+-        contribution={contribution}
+-        locale={locale}
+-        palette={palette}
+-        sessions={sessions}
+-        limits={limits}
+-        captureCanvasWheelOverWidgets={captureCanvasWheelOverWidgets}
+-        onCanvasWheel={onCanvasWheel}
+-        onFocus={onWidgetFocus}
+-        onHoverChange={onWidgetHoverChange}
+-        canvasInstanceId={instance.id}
+-        onOpenLauncher={onOpenLauncher}
+-        onError={onError}
+-        onMascotDrag={isMascot ? dragMascot : undefined}
+-        suspended={!surfaceIsLive(lifecycle)}
+-      />
++      <div className={`plugin-canvas-card__surface ${isMascot ? "" : "terminal-card__surface"}`}>
++        <PluginFrame
++          key={plugin.selectedModules.join(",")}
++          className="plugin-canvas-card__frame"
++          plugin={plugin}
++          contribution={contribution}
++          locale={locale}
++          palette={palette}
++          sessions={sessions}
++          limits={limits}
++          captureCanvasWheelOverWidgets={captureCanvasWheelOverWidgets}
++          onCanvasWheel={onCanvasWheel}
++          onFocus={onWidgetFocus}
++          onHoverChange={onWidgetHoverChange}
++          canvasInstanceId={instance.id}
++          onOpenLauncher={onOpenLauncher}
++          onError={onError}
++          onMascotDrag={isMascot ? dragMascot : undefined}
++          suspended={!surfaceIsLive(lifecycle)}
++        />
++      </div>
+       <button
+-        className="plugin-canvas-card__summary"
++        className={`plugin-canvas-card__summary ${isMascot ? "" : "terminal-card__summary"}`}
+         type="button"
+         onClick={() => onActivate(instance)}
+         aria-label={instance.title}
+       >
+         <span><strong>{instance.title}</strong><small>{plugin.manifest.name}</small></span>
+       </button>
++      {pixelSkinTheme && (
++        <Canvas2DSkinView theme={pixelSkinTheme} status="idle" width={size.width} height={size.height}
++          detail={pixelDetail} surfaceBounds={pixelSurfaceBounds ?? undefined} />
++      )}
++      {pixelSkinTheme && (["top", "right", "bottom", "left"] as const).map((edge) => (
++        <div key={edge} className={`terminal-card__skin-drag terminal-card__skin-drag--${edge}`}
++          aria-hidden="true" onPointerDown={startDrag} onPointerMove={drag} onPointerUp={endDrag}
++          onPointerCancel={endDrag} onLostPointerCapture={cancelDrag} />
++      ))}
+       {RESIZE_DIRECTIONS.map((direction) => (
+         <div
+           key={direction}
+diff --git a/src/renderer/src/features/workspace/WorkspaceCanvas.tsx b/src/renderer/src/features/workspace/WorkspaceCanvas.tsx
+index 0672a44..d05bb3d 100644
+--- a/src/renderer/src/features/workspace/WorkspaceCanvas.tsx
++++ b/src/renderer/src/features/workspace/WorkspaceCanvas.tsx
+@@ -1237,6 +1237,8 @@ export function WorkspaceCanvas(props: WorkspaceCanvasProps): React.JSX.Element
+                 contribution={contribution}
+                 locale={settings.locale}
+                 palette={settings.palette}
++                borderSkin={settings.terminalBorderSkin}
++                skinDetail={settings.terminalSkinDetail}
+                 camera={camera}
+                 stackIndex={canvasLayerZIndex(layerOrder, pluginLayerId(instance.id))}
+                 snapEnabled={settings.snapToGrid}
+diff --git a/src/renderer/src/lib/skinStyles.ts b/src/renderer/src/lib/skinStyles.ts
+index cf1da9e..7050595 100644
+--- a/src/renderer/src/lib/skinStyles.ts
++++ b/src/renderer/src/lib/skinStyles.ts
+@@ -298,7 +298,13 @@ export function scopeTerminalBorderSkinCss(css: unknown, skinId: unknown, target
+     if (close < 0) return null;
+     const body = source.slice(open + 1, close);
+     if (!hasValidDeclarations(body)) return null;
+-    output.push(`${selectors.map((selector) => scopeSelector(selector, scope, target)).join(", ")} { ${body.trim()} }`);
++    const scopedSelectors = selectors.flatMap((selector) => {
++      const scoped = scopeSelector(selector, scope, target);
++      return target === "card"
++        ? [scoped, scopeSelector(selector, scope.replace(".terminal-card[", ".plugin-canvas-card["), target)]
++        : [scoped];
++    });
++    output.push(`${scopedSelectors.join(", ")} { ${body.trim()} }`);
+     cursor = close + 1;
+   }
+ 
+diff --git a/src/renderer/src/styles/app.css b/src/renderer/src/styles/app.css
+index 1296bb3..4f42fe4 100644
+--- a/src/renderer/src/styles/app.css
++++ b/src/renderer/src/styles/app.css
+@@ -675,7 +675,8 @@ button { border: 0; }
+ .plugin-canvas-card__header small { color: var(--text-muted-on-dark); font-size: .77em; }
+ .plugin-canvas-card__header button { width: 2.15em; height: 2.15em; display: grid; place-items: center; border-radius: .54em; color: rgba(255,255,255,.72); background: rgba(255,255,255,.06); cursor: pointer; }
+ .plugin-canvas-card__header button:hover { color: white; background: var(--danger); }
+-.plugin-canvas-card__frame { height: calc(100% - var(--card-header-height)); background: transparent; }
++.plugin-canvas-card__surface { height: calc(100% - var(--card-header-height)); overflow: hidden; }
++.plugin-canvas-card__frame { height: 100%; background: transparent; }
+ .plugin-canvas-card__summary { position: absolute; inset: var(--card-header-height) 0 0; width: 100%; height: calc(100% - var(--card-header-height)); display: none; align-items: center; justify-content: center; padding: 24px; color: white; background: var(--surface); cursor: zoom-in; }
+ .plugin-canvas-card__summary > span { max-width: 76%; display: flex; flex-direction: column; gap: 7px; transform: scale(var(--summary-scale, 1)); }
+ .plugin-canvas-card__summary strong, .plugin-canvas-card__summary small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+diff --git a/src/renderer/src/styles/mascots.css b/src/renderer/src/styles/mascots.css
+index 85eeaae..e864701 100644
+--- a/src/renderer/src/styles/mascots.css
++++ b/src/renderer/src/styles/mascots.css
+@@ -25,6 +25,7 @@
+ .plugin-canvas-card--mascot .plugin-canvas-card__header > span { display: none; }
+ .plugin-canvas-card--mascot .plugin-canvas-card__header button { width: 34px; height: 34px; opacity: 0; background: var(--surface-soft); }
+ .plugin-canvas-card--mascot:hover .plugin-canvas-card__header button, .plugin-canvas-card--mascot .plugin-canvas-card__header button:focus-visible { opacity: 1; }
++.plugin-canvas-card--mascot .plugin-canvas-card__surface,
+ .plugin-canvas-card--mascot .plugin-canvas-card__frame { height: 100%; background: transparent; }
+ .plugin-canvas-card--mascot .plugin-canvas-card__summary { inset: 0; height: 100%; background: var(--surface-soft); }
+ .plugin-canvas-card--mascot .terminal-card__resize-handle--se { z-index: 21; width: 24px; height: 24px; border-radius: 7px 0 0; background: #27242ecc; opacity: 0; transition: opacity .15s ease; }
+diff --git a/src/renderer/src/styles/ornateTerminalSkins.css b/src/renderer/src/styles/ornateTerminalSkins.css
+index a486e22..bdb0597 100644
+--- a/src/renderer/src/styles/ornateTerminalSkins.css
++++ b/src/renderer/src/styles/ornateTerminalSkins.css
+@@ -1,17 +1,17 @@
+ /* Dimensional chrome stays at the edges; xterm owns the opaque interior. */
+-.terminal-card[data-border-skin="cybercore"],
+-.terminal-card[data-border-skin="titanium"],
+-.terminal-card[data-border-skin="retro"] {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="cybercore"],
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="titanium"],
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="retro"] {
+   isolation: isolate;
+   border-radius: 8px;
+ }
+ 
+-.terminal-card[data-border-skin="cybercore"]::before,
+-.terminal-card[data-border-skin="cybercore"]::after,
+-.terminal-card[data-border-skin="titanium"]::before,
+-.terminal-card[data-border-skin="titanium"]::after,
+-.terminal-card[data-border-skin="retro"]::before,
+-.terminal-card[data-border-skin="retro"]::after {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="cybercore"]::before,
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="cybercore"]::after,
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="titanium"]::before,
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="titanium"]::after,
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="retro"]::before,
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="retro"]::after {
+   content: "";
+   position: absolute;
+   z-index: 5;
+@@ -19,32 +19,32 @@
+   pointer-events: none;
+ }
+ 
+-.terminal-card:is([data-border-skin="cybercore"], [data-border-skin="titanium"],
++:is(.terminal-card, .plugin-canvas-card):is([data-border-skin="cybercore"], [data-border-skin="titanium"],
+   [data-border-skin="retro"]) .terminal-card__surface {
+   padding: 0 clamp(18px, 4.8%, 26px) clamp(20px, 5%, 28px);
+ }
+ /* Cybercore: split light rails, machined corners and a lit control deck. */
+-.terminal-card[data-border-skin="cybercore"] {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="cybercore"] {
+   border: 2px solid #29c7ed;
+   background: #111923;
+   box-shadow: inset 0 0 0 2px #07121c, 0 0 0 1px #075777,
+     0 0 17px #12bce470, 0 16px 35px #02070db8;
+ }
+-.terminal-card[data-border-skin="cybercore"] .terminal-card__header {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="cybercore"] .terminal-card__header {
+   color: #e9f9ff;
+   background: linear-gradient(180deg, #24516a 0, #162c40 8%, #0d1725 46%, #18364a 94%, #2ed0ef 100%);
+   box-shadow: inset 0 2px #8ef5ff8c, inset 0 -3px #07131e;
+ }
+-.terminal-card[data-border-skin="cybercore"] .terminal-card__actions button {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="cybercore"] .terminal-card__actions button {
+   border: 1px solid #49cfea72;
+   background: linear-gradient(145deg, #1c4054, #0c1c2b);
+ }
+-.terminal-card[data-border-skin="cybercore"]::before {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="cybercore"]::before {
+   border: 1px solid #8af5ffbd;
+   border-radius: 5px;
+   box-shadow: inset 0 0 0 3px #082436, inset 0 0 0 4px #1d83a078;
+ }
+-.terminal-card[data-border-skin="cybercore"]::after {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="cybercore"]::after {
+   background:
+     linear-gradient(135deg, #8af5ff 0 34%, #0d5272 35% 47%, #8af5ff 48% 57%, transparent 58%) top left / clamp(16px, 5%, 22px) clamp(7px, 2.7%, 10px) no-repeat,
+     linear-gradient(225deg, #8af5ff 0 34%, #0d5272 35% 47%, #8af5ff 48% 57%, transparent 58%) top right / clamp(16px, 5%, 22px) clamp(7px, 2.7%, 10px) no-repeat,
+@@ -56,32 +56,32 @@
+     linear-gradient(90deg, transparent, #53e8ff, transparent) top center / 55% 2px no-repeat;
+   opacity: .87;
+ }
+-.terminal-card[data-border-skin="cybercore"]:is(:focus-within, .terminal-card--selected) {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="cybercore"]:is(:focus-within, :is(.terminal-card--selected, .plugin-canvas-card--selected)) {
+   box-shadow: 0 0 0 3px var(--primary), 0 0 22px #24d9ff9c, 0 16px 35px #02070db8;
+ }
+ 
+ /* Titanium: cold pressed steel with riveted corners and brushed rails. */
+-.terminal-card[data-border-skin="titanium"] {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="titanium"] {
+   border: 4px solid #728ba9;
+   background: #202430;
+   box-shadow: inset 0 0 0 2px #182332, 0 0 0 1px #c2d3e3,
+     0 8px 0 #131d2ab0, 0 20px 36px #01050ab8;
+ }
+-.terminal-card[data-border-skin="titanium"] .terminal-card__header {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="titanium"] .terminal-card__header {
+   color: #f4f8fb;
+   background: linear-gradient(180deg, #d1dfeb 0, #879bb2 4%, #526982 13%, #26364c 48%, #384f69 88%, #101a28 100%);
+   box-shadow: inset 0 2px #eff8ffd1, inset 0 -3px #101c2b;
+ }
+-.terminal-card[data-border-skin="titanium"] .terminal-card__actions button {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="titanium"] .terminal-card__actions button {
+   border: 1px solid #b5c9dc6b;
+   background: linear-gradient(155deg, #53677d, #1d2939 65%);
+ }
+-.terminal-card[data-border-skin="titanium"]::before {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="titanium"]::before {
+   border: 2px solid #a7bcd1;
+   border-radius: 4px;
+   box-shadow: inset 0 0 0 2px #233349, inset 0 0 0 4px #617b9880;
+ }
+-.terminal-card[data-border-skin="titanium"]::after {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="titanium"]::after {
+   background:
+     linear-gradient(180deg, #d9e5ee 0 2px, #52677e 2px 4px) top left / clamp(18px, 5%, 24px) 4px no-repeat,
+     linear-gradient(90deg, #d9e5ee 0 2px, #52677e 2px 4px) top left / 4px clamp(18px, 5%, 24px) no-repeat,
+@@ -98,36 +98,36 @@
+     repeating-linear-gradient(90deg, #90a8bd 0 2px, #324760 2px 6px) bottom center / min(28%, 120px) 5px no-repeat,
+     linear-gradient(90deg, transparent, #e5f2ff91, transparent) top center / 68% 2px no-repeat;
+ }
+-.terminal-card[data-border-skin="titanium"]:is(:focus-within, .terminal-card--selected) {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="titanium"]:is(:focus-within, :is(.terminal-card--selected, .plugin-canvas-card--selected)) {
+   box-shadow: 0 0 0 3px var(--primary), 0 8px 0 #131d2ab0, 0 20px 36px #01050ab8;
+ }
+ 
+ /* Retro: ivory enamel housing, dark ink edges and square stamped corners. */
+-.terminal-card[data-border-skin="retro"] {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="retro"] {
+   border: 5px solid #dbc7a4;
+   border-radius: 3px;
+   background: #15191b;
+   box-shadow: inset 0 0 0 2px #3b352e, 0 0 0 1px #fff0d1,
+     0 7px 0 #635542, 0 18px 30px #080706b8;
+ }
+-.terminal-card[data-border-skin="retro"] .terminal-card__header {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="retro"] .terminal-card__header {
+   color: #25231f;
+   background: linear-gradient(180deg, #fff5de 0, #e9d9b9 12%, #c3ad88 88%, #8b785d 100%);
+   box-shadow: inset 0 2px #fffdf0, inset 0 -3px #7a6b57;
+ }
+-.terminal-card[data-border-skin="retro"] .terminal-card__actions button {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="retro"] .terminal-card__actions button {
+   color: #25231f;
+   border: 1px solid #514537;
+   border-radius: 2px;
+   background: linear-gradient(#f3e5c7, #b7a17d);
+   box-shadow: 1px 2px #665641;
+ }
+-.terminal-card[data-border-skin="retro"]::before {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="retro"]::before {
+   border: 2px solid #211f1b;
+   border-radius: 1px;
+   box-shadow: inset 0 0 0 2px #efdfbd;
+ }
+-.terminal-card[data-border-skin="retro"]::after {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="retro"]::after {
+   background:
+     linear-gradient(180deg, #211f1b 0 3px, #efdfbd 3px 5px) top left / clamp(16px, 5%, 22px) 5px no-repeat,
+     linear-gradient(90deg, #211f1b 0 3px, #efdfbd 3px 5px) top left / 5px clamp(16px, 5%, 22px) no-repeat,
+@@ -143,23 +143,23 @@
+     linear-gradient(315deg, #fff4d9 0 38%, #211f1b 39% 50%, #fff4d9 51% 62%, transparent 63%) bottom right / clamp(14px, 4%, 18px) clamp(12px, 5%, 16px) no-repeat,
+     repeating-linear-gradient(90deg, #22201b 0 5px, #f2e0bb 5px 9px) bottom center / min(30%, 120px) 4px no-repeat;
+ }
+-.terminal-card[data-border-skin="retro"]:is(:focus-within, .terminal-card--selected) {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="retro"]:is(:focus-within, :is(.terminal-card--selected, .plugin-canvas-card--selected)) {
+   box-shadow: 0 0 0 3px var(--primary), 0 7px 0 #635542, 0 18px 30px #080706b8;
+ }
+ 
+ /* Match the shared warning ring with higher skin-scoped specificity. */
+-.terminal-card.terminal-card--attention:is([data-border-skin="cybercore"], [data-border-skin="titanium"],
+-  [data-border-skin="retro"]):is(:focus-within, .terminal-card--selected) {
++:is(.terminal-card, .plugin-canvas-card).terminal-card--attention:is([data-border-skin="cybercore"], [data-border-skin="titanium"],
++  [data-border-skin="retro"]):is(:focus-within, :is(.terminal-card--selected, .plugin-canvas-card--selected)) {
+   box-shadow: 0 0 0 3px var(--warning, #d8a24a),
+     0 0 0 6px color-mix(in srgb, var(--primary) 42%, transparent), var(--shadow-lg);
+ }
+ 
+ /* Slow rail sweeps live in a narrow header track, clear of controls and corner hardware. */
+-.terminal-card:is([data-border-skin="cybercore"], [data-border-skin="titanium"],
++:is(.terminal-card, .plugin-canvas-card):is([data-border-skin="cybercore"], [data-border-skin="titanium"],
+   [data-border-skin="retro"]) .terminal-card__header {
+   position: relative;
+ }
+-.terminal-card:is([data-border-skin="cybercore"], [data-border-skin="titanium"],
++:is(.terminal-card, .plugin-canvas-card):is([data-border-skin="cybercore"], [data-border-skin="titanium"],
+   [data-border-skin="retro"]) .terminal-card__header::after {
+   content: "";
+   position: absolute;
+@@ -174,17 +174,17 @@
+   pointer-events: none;
+   opacity: 0;
+ }
+-.terminal-card[data-border-skin="cybercore"] .terminal-card__header::after {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="cybercore"] .terminal-card__header::after {
+   background-image: linear-gradient(90deg, transparent 0 38%, #38d7f2 41% 43%, transparent 43% 46%,
+     #d8fbff 47% 49%, transparent 49% 52%, #38d7f2 53% 56%, transparent 60% 100%);
+   animation: terminal-skin-rail-sweep 9s linear 0s infinite;
+ }
+-.terminal-card[data-border-skin="titanium"] .terminal-card__header::after {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="titanium"] .terminal-card__header::after {
+   background-image: linear-gradient(90deg, transparent 0 43%, #b9cbdc 47%, #f5fbff 50%,
+     #a9bfd2 53%, transparent 58% 100%);
+   animation: terminal-skin-rail-sweep 12s linear 1.8s infinite;
+ }
+-.terminal-card[data-border-skin="retro"] .terminal-card__header::after {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="retro"] .terminal-card__header::after {
+   background-image: linear-gradient(90deg, transparent 0 42%, #bf8954 47%, #ffe5b0 50%,
+     #c88c56 53%, transparent 59% 100%);
+   animation: terminal-skin-rail-sweep 16s linear 2.7s infinite;
+@@ -197,7 +197,7 @@
+   100% { opacity: 0; background-position: 0 0; }
+ }
+ @media (prefers-reduced-motion: reduce) {
+-  .terminal-card:is([data-border-skin="cybercore"], [data-border-skin="titanium"],
++  :is(.terminal-card, .plugin-canvas-card):is([data-border-skin="cybercore"], [data-border-skin="titanium"],
+     [data-border-skin="retro"]) .terminal-card__header::after {
+     animation: none;
+     opacity: 0;
+diff --git a/src/renderer/src/styles/pixelTerminalSkins.css b/src/renderer/src/styles/pixelTerminalSkins.css
+index 20d07c1..18bf9f5 100644
+--- a/src/renderer/src/styles/pixelTerminalSkins.css
++++ b/src/renderer/src/styles/pixelTerminalSkins.css
+@@ -1,46 +1,46 @@
+-.terminal-card[data-border-skin="sakura"] {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="sakura"] {
+   --pixel-skin-accent: #e77ca7;
+   --pixel-skin-surface: #17161e;
+   border-color: #75445f;
+   box-shadow: 0 0 0 1px #2c2035, 0 13px 28px #08080cc4;
+ }
+-.terminal-card[data-border-skin="matrix"] {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="matrix"] {
+   --pixel-skin-accent: #36e886;
+   --pixel-skin-surface: #07120c;
+   border-color: #1e7548;
+   box-shadow: 0 0 0 1px #123522, 0 13px 28px #060a08cc;
+ }
+-.terminal-card[data-border-skin="forest-cabin"] {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="forest-cabin"] {
+   --pixel-skin-accent: #efab68;
+   --pixel-skin-surface: #17120e;
+   border-color: #754c32;
+   box-shadow: 0 0 0 1px #35251d, 0 13px 28px #090706cc;
+ }
+-.terminal-card[data-border-skin="gold-black"] {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="gold-black"] {
+   --pixel-skin-accent: #f2c04d;
+   --pixel-skin-surface: #14120c;
+   border-color: #80642b;
+   box-shadow: 0 0 0 1px #3c3018, 0 13px 28px #080806cc;
+ }
+-.terminal-card[data-border-skin="cat"] {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="cat"] {
+   --pixel-skin-accent: #f5a742;
+   --pixel-skin-surface: #181412;
+   border-color: #8c5a2b;
+   box-shadow: 0 0 0 1px #3d2617, 0 13px 28px #0a0807cc;
+ }
+-.terminal-card[data-border-skin="gothic-eclipse"] {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="gothic-eclipse"] {
+   --pixel-skin-accent: #db7955;
+   --pixel-skin-surface: #151014;
+   border-color: #68403d;
+   box-shadow: 0 0 0 1px #352325, 0 13px 28px #080607cc;
+ }
+-.terminal-card[data-border-skin^="pixel:"] {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin^="pixel:"] {
+   --pixel-skin-accent: #aac8d4;
+   --pixel-skin-surface: #0a0a0d;
+   border-color: #566974;
+ }
+ 
+-.terminal-card[data-pixel-skin="true"] {
++:is(.terminal-card, .plugin-canvas-card)[data-pixel-skin="true"] {
+   --card-header-height: 26px;
+   border: 0;
+   border-radius: 0;
+@@ -48,7 +48,7 @@
+   box-shadow: none;
+   outline: none;
+ }
+-.terminal-card[data-border-skin="sakura"]::before {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="sakura"]::before {
+   content: "";
+   position: absolute;
+   z-index: 0;
+@@ -56,10 +56,10 @@
+   background: #0a0a0d;
+   pointer-events: none;
+ }
+-.terminal-card[data-pixel-skin="true"]:is(:focus-visible, :focus-within, .terminal-card--selected) .terminal-skin-canvas {
++:is(.terminal-card, .plugin-canvas-card)[data-pixel-skin="true"]:is(:focus-visible, :focus-within, :is(.terminal-card--selected, .plugin-canvas-card--selected)) .terminal-skin-canvas {
+   filter: drop-shadow(0 0 3px var(--pixel-skin-accent));
+ }
+-.terminal-card[data-pixel-skin="true"] .terminal-card__header {
++:is(.terminal-card, .plugin-canvas-card)[data-pixel-skin="true"] .terminal-card__header {
+   position: absolute;
+   z-index: 4;
+   top: var(--pixel-skin-top-inset);
+@@ -72,42 +72,42 @@
+   font-size: 11px;
+   text-shadow: 0 1px 2px #000;
+ }
+-.terminal-card[data-pixel-skin="true"] .terminal-card__identity {
++:is(.terminal-card, .plugin-canvas-card)[data-pixel-skin="true"] .terminal-card__identity {
+   flex: 1;
+   overflow: hidden;
+ }
+-.terminal-card[data-pixel-skin="true"] .terminal-card__identity .provider-icon--small {
++:is(.terminal-card, .plugin-canvas-card)[data-pixel-skin="true"] .terminal-card__identity .provider-icon--small {
+   width: 20px;
+   height: 20px;
+   --provider-icon-art-size: 17px;
+ }
+-.terminal-card[data-pixel-skin="true"] .terminal-card__actions--pixel {
++:is(.terminal-card, .plugin-canvas-card)[data-pixel-skin="true"] .terminal-card__actions--pixel {
+   position: absolute;
+   z-index: 5;
+   justify-content: center;
+   padding: 0 4px;
+   gap: 14px;
+ }
+-.terminal-card[data-pixel-skin="true"] .terminal-card__actions button {
++:is(.terminal-card, .plugin-canvas-card)[data-pixel-skin="true"] .terminal-card__actions button {
+   width: var(--pixel-control-size, 27px);
+   height: var(--pixel-control-size, 27px);
+   border-radius: 3px;
+   color: var(--pixel-skin-accent);
+   background: color-mix(in srgb, var(--pixel-skin-surface), white 8%);
+ }
+-.terminal-card[data-pixel-skin="true"] .terminal-card__actions--pixel button {
++:is(.terminal-card, .plugin-canvas-card)[data-pixel-skin="true"] .terminal-card__actions--pixel button {
+   font-size: var(--pixel-control-font-size);
+   border: 0;
+   border-radius: 0;
+   background: transparent;
+   color: var(--pixel-skin-accent);
+ }
+-.terminal-card[data-pixel-skin="true"] .terminal-card__actions--pixel button:is(:hover, :focus-visible) {
++:is(.terminal-card, .plugin-canvas-card)[data-pixel-skin="true"] .terminal-card__actions--pixel button:is(:hover, :focus-visible) {
+   outline: 0;
+   background: transparent;
+   filter: brightness(1.4) drop-shadow(0 0 3px var(--pixel-skin-accent));
+ }
+-.terminal-card[data-pixel-skin="true"] .terminal-card__surface {
++:is(.terminal-card, .plugin-canvas-card)[data-pixel-skin="true"] .terminal-card__surface {
+   position: absolute;
+   z-index: 2;
+   inset: calc(var(--pixel-skin-top-inset) + var(--card-header-height)) var(--pixel-skin-right-inset) var(--pixel-skin-bottom-inset) var(--pixel-skin-left-inset);
+@@ -118,32 +118,32 @@
+   background: transparent;
+   overflow: hidden;
+ }
+-.terminal-card[data-pixel-skin="true"] .terminal-card__surface .xterm-viewport {
++:is(.terminal-card, .plugin-canvas-card)[data-pixel-skin="true"] .terminal-card__surface .xterm-viewport {
+   background-color: transparent;
+   scrollbar-width: none;
+ }
+-.terminal-card[data-pixel-skin="true"] .terminal-card__surface .xterm-viewport::-webkit-scrollbar {
++:is(.terminal-card, .plugin-canvas-card)[data-pixel-skin="true"] .terminal-card__surface .xterm-viewport::-webkit-scrollbar {
+   display: none;
+ }
+-.terminal-card[data-pixel-skin="true"]:has(.terminal-skin-canvas[data-overlay="true"]) .terminal-card__surface {
++:is(.terminal-card, .plugin-canvas-card)[data-pixel-skin="true"]:has(.terminal-skin-canvas[data-overlay="true"]) .terminal-card__surface {
+   background: #0a0a0d;
+   box-shadow: 0 0 28px 12px #0a0a0d;
+ }
+-.terminal-card[data-pixel-skin="true"] .terminal-card__search {
++:is(.terminal-card, .plugin-canvas-card)[data-pixel-skin="true"] .terminal-card__search {
+   top: calc(var(--pixel-skin-top-inset) + var(--card-header-height) + 6px);
+   right: calc(var(--pixel-skin-right-inset) + 8px);
+ }
+-.terminal-card[data-pixel-skin="true"] .terminal-card__summary {
++:is(.terminal-card, .plugin-canvas-card)[data-pixel-skin="true"] .terminal-card__summary {
+   z-index: 4;
+   inset: var(--pixel-skin-top-inset) var(--pixel-skin-right-inset) var(--pixel-skin-bottom-inset) var(--pixel-skin-left-inset);
+   width: auto;
+   height: auto;
+   background: var(--pixel-skin-surface);
+ }
+-.terminal-card[data-pixel-skin="true"] .terminal-card__summary:hover {
++:is(.terminal-card, .plugin-canvas-card)[data-pixel-skin="true"] .terminal-card__summary:hover {
+   background: color-mix(in srgb, var(--pixel-skin-surface), white 8%);
+ }
+-.terminal-card[data-pixel-skin="true"] .terminal-skin-canvas {
++:is(.terminal-card, .plugin-canvas-card)[data-pixel-skin="true"] .terminal-skin-canvas {
+   position: absolute;
+   z-index: 1;
+   inset: 0;
+@@ -153,41 +153,41 @@
+   image-rendering: pixelated;
+   pointer-events: none;
+ }
+-.terminal-card[data-pixel-skin="true"] .terminal-skin-canvas[data-overlay="true"] {
++:is(.terminal-card, .plugin-canvas-card)[data-pixel-skin="true"] .terminal-skin-canvas[data-overlay="true"] {
+   z-index: 3;
+ }
+-.terminal-card[data-pixel-skin="true"] .terminal-skin-canvas--frame {
++:is(.terminal-card, .plugin-canvas-card)[data-pixel-skin="true"] .terminal-skin-canvas--frame {
+   z-index: 3;
+ }
+-.terminal-card[data-pixel-skin="true"]:has(.terminal-skin-canvas--frame) .terminal-skin-canvas:not(.terminal-skin-canvas--frame) {
++:is(.terminal-card, .plugin-canvas-card)[data-pixel-skin="true"]:has(.terminal-skin-canvas--frame) .terminal-skin-canvas:not(.terminal-skin-canvas--frame) {
+   filter: none;
+ }
+-.terminal-card[data-pixel-skin="true"] .terminal-card__skin-drag {
++:is(.terminal-card, .plugin-canvas-card)[data-pixel-skin="true"] .terminal-card__skin-drag {
+   position: absolute;
+   z-index: 4;
+   cursor: move;
+   touch-action: none;
+ }
+-.terminal-card[data-pixel-skin="true"] .terminal-card__skin-drag--top {
++:is(.terminal-card, .plugin-canvas-card)[data-pixel-skin="true"] .terminal-card__skin-drag--top {
+   inset: 0 0 auto;
+   height: var(--pixel-skin-top-inset);
+ }
+-.terminal-card[data-pixel-skin="true"] .terminal-card__skin-drag--right {
++:is(.terminal-card, .plugin-canvas-card)[data-pixel-skin="true"] .terminal-card__skin-drag--right {
+   inset: var(--pixel-skin-top-inset) 0 var(--pixel-skin-bottom-inset) auto;
+   width: var(--pixel-skin-right-inset);
+ }
+-.terminal-card[data-pixel-skin="true"] .terminal-card__skin-drag--bottom {
++:is(.terminal-card, .plugin-canvas-card)[data-pixel-skin="true"] .terminal-card__skin-drag--bottom {
+   inset: auto 0 0;
+   height: var(--pixel-skin-bottom-inset);
+ }
+-.terminal-card[data-pixel-skin="true"] .terminal-card__skin-drag--left {
++:is(.terminal-card, .plugin-canvas-card)[data-pixel-skin="true"] .terminal-card__skin-drag--left {
+   inset: var(--pixel-skin-top-inset) auto var(--pixel-skin-bottom-inset) 0;
+   width: var(--pixel-skin-left-inset);
+ }
+-.terminal-card--summary[data-pixel-skin="true"] .terminal-card__header {
++:is(.terminal-card--summary, .plugin-canvas-card--summary)[data-pixel-skin="true"] .terminal-card__header {
+   display: none;
+ }
+-.terminal-card[data-pixel-skin="true"]:is(:focus-within, .terminal-card--selected) {
++:is(.terminal-card, .plugin-canvas-card)[data-pixel-skin="true"]:is(:focus-within, :is(.terminal-card--selected, .plugin-canvas-card--selected)) {
+   box-shadow: none;
+ }
+ 
+@@ -346,3 +346,7 @@
+   opacity: .8;
+   font-weight: 600;
+ }
++
++/* The plugin iframe fills the same aperture as a terminal surface. */
++.plugin-canvas-card[data-pixel-skin="true"] .plugin-canvas-card__header small { display: none; }
++.plugin-canvas-card[data-pixel-skin="true"] .plugin-canvas-card__header button { width: 22px; height: 22px; }
+diff --git a/src/renderer/src/styles/terminalSkins.css b/src/renderer/src/styles/terminalSkins.css
+index e880760..e8c86b3 100644
+--- a/src/renderer/src/styles/terminalSkins.css
++++ b/src/renderer/src/styles/terminalSkins.css
+@@ -1,62 +1,62 @@
+-.terminal-card[data-border-skin="minimal"] {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="minimal"] {
+   border-color: rgba(213, 223, 230, .42);
+   border-radius: 6px;
+   box-shadow: 0 7px 24px rgba(0, 0, 0, .26);
+ }
+-.terminal-card[data-border-skin="minimal"] .terminal-card__header {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="minimal"] .terminal-card__header {
+   background: #292d33;
+ }
+-.terminal-card[data-border-skin="minimal"]:is(:focus-within, .terminal-card--selected) {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="minimal"]:is(:focus-within, :is(.terminal-card--selected, .plugin-canvas-card--selected)) {
+   box-shadow: 0 0 0 3px var(--primary), 0 7px 24px rgba(0, 0, 0, .26);
+ }
+ 
+-.terminal-card[data-border-skin="glass"] {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="glass"] {
+   border-color: rgba(223, 245, 255, .6);
+   border-radius: 13px;
+   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .14), 0 14px 36px rgba(0, 0, 0, .28);
+ }
+-.terminal-card[data-border-skin="glass"] .terminal-card__header {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="glass"] .terminal-card__header {
+   background: linear-gradient(135deg, rgba(127, 180, 195, .37), rgba(75, 82, 106, .86) 55%, rgba(183, 127, 167, .32));
+ }
+-.terminal-card[data-border-skin="glass"]:is(:focus-within, .terminal-card--selected) {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="glass"]:is(:focus-within, :is(.terminal-card--selected, .plugin-canvas-card--selected)) {
+   box-shadow: 0 0 0 3px var(--primary), 0 14px 36px rgba(0, 0, 0, .28);
+ }
+ 
+-.terminal-card[data-border-skin="cyber"] {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="cyber"] {
+   border: 2px solid #50d9de;
+   border-radius: 7px;
+   box-shadow: 0 0 0 1px rgba(12, 79, 86, .8), 0 0 18px rgba(62, 213, 220, .28), var(--shadow-lg);
+ }
+-.terminal-card[data-border-skin="cyber"] .terminal-card__header {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="cyber"] .terminal-card__header {
+   background: linear-gradient(90deg, #123c44, #202c3c 68%, #432b4b);
+ }
+-.terminal-card[data-border-skin="cyber"]:is(:focus-within, .terminal-card--selected) {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="cyber"]:is(:focus-within, :is(.terminal-card--selected, .plugin-canvas-card--selected)) {
+   box-shadow: 0 0 0 3px var(--primary), 0 0 20px rgba(62, 213, 220, .42), var(--shadow-lg);
+ }
+ 
+-.terminal-card[data-border-skin="nord"] {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="nord"] {
+   border: 2px solid #8fa8b3;
+   border-radius: 9px;
+   box-shadow: 0 0 0 1px rgba(25, 45, 55, .8), var(--shadow-lg);
+ }
+-.terminal-card[data-border-skin="nord"] .terminal-card__header {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="nord"] .terminal-card__header {
+   background: linear-gradient(#526e7a, #344b58);
+ }
+-.terminal-card[data-border-skin="nord"]:is(:focus-within, .terminal-card--selected) {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="nord"]:is(:focus-within, :is(.terminal-card--selected, .plugin-canvas-card--selected)) {
+   box-shadow: 0 0 0 3px var(--primary), var(--shadow-lg);
+ }
+ 
+-.terminal-card[data-border-skin="gradient"] {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="gradient"] {
+   border: 2px solid transparent;
+   border-radius: 13px;
+   background: linear-gradient(var(--terminal-background, #202430), var(--terminal-background, #202430)) padding-box,
+     linear-gradient(125deg, #f0ab7c, #d28ac3 48%, #75c8d4) border-box;
+ }
+-.terminal-card[data-border-skin="gradient"] .terminal-card__header {
++:is(.terminal-card, .plugin-canvas-card)[data-border-skin="gradient"] .terminal-card__header {
+   background: linear-gradient(110deg, #564152, #51445d 50%, #315b67);
+ }
+ 
+-.terminal-card--attention[data-border-skin]:is(:focus-within, .terminal-card--selected) {
++.terminal-card--attention[data-border-skin]:is(:focus-within, :is(.terminal-card--selected, .plugin-canvas-card--selected)) {
+   box-shadow: 0 0 0 3px var(--warning, #d8a24a), 0 0 0 6px color-mix(in srgb, var(--primary) 42%, transparent), var(--shadow-lg);
+ }
+ 
+diff --git a/tests/helpers/fake-react.mjs b/tests/helpers/fake-react.mjs
+index 77b20e4..e914a42 100644
+--- a/tests/helpers/fake-react.mjs
++++ b/tests/helpers/fake-react.mjs
+@@ -4,6 +4,7 @@
+ // run at the end of `__render()` when their dependencies changed, cleaning up the previous run first.
+ import { fileURLToPath } from "node:url";
+ import { build } from "esbuild";
++import { readFile } from "node:fs/promises";
+ 
+ const FAKE_REACT = `
+ let slots = [];
+@@ -85,6 +86,12 @@ export async function importWithFakeReact(modulePath, exports, { checkSnapshots
+       setup(builder) {
+         builder.onResolve({ filter: /^react(\/jsx-runtime)?$/ }, () => ({ path: "react", namespace: "fake-react" }));
+         builder.onLoad({ filter: /.*/, namespace: "fake-react" }, () => ({ contents: FAKE_REACT, loader: "js" }));
++        // Node has no Vite asset glob. Geometry/lifecycle tests do not decode frame artwork;
++        // the production renderer still resolves every real pilot asset through Vite.
++        builder.onLoad({ filter: /SkinAssets\.ts$/ }, async ({ path }) => ({
++          contents: (await readFile(path, "utf8")).replace(/const pilotModules = import\.meta\.glob<string>\([\s\S]*?\);/u, "const pilotModules = {};"),
++          loader: "ts"
++        }));
+       }
+     }]
+   });
+diff --git a/tests/pixel-skin-engine.test.mjs b/tests/pixel-skin-engine.test.mjs
+index 885bec8..7d61b22 100644
+--- a/tests/pixel-skin-engine.test.mjs
++++ b/tests/pixel-skin-engine.test.mjs
+@@ -141,19 +141,19 @@ test("master terminal openings keep output within the themed frame", async () =>
+ 
+   const css = await readFile(new URL("../src/renderer/src/styles/pixelTerminalSkins.css", import.meta.url), "utf8");
+   const card = await readFile(new URL("../src/renderer/src/features/terminal/TerminalCard.tsx", import.meta.url), "utf8");
+-  assert.match(css, /\.terminal-card\[data-pixel-skin="true"\] \.terminal-card__surface\s*\{[^}]*z-index:\s*2;/s);
+-  assert.match(css, /\.terminal-card\[data-pixel-skin="true"\] \.terminal-card__surface \.xterm-viewport\s*\{[^}]*scrollbar-width:\s*none;/s);
+-  assert.match(css, /\.terminal-card\[data-pixel-skin="true"\]\s*\{[^}]*background:\s*transparent;/s);
+-  assert.match(css, /\.terminal-card\[data-pixel-skin="true"\] \.terminal-card__header\s*\{[^}]*top:\s*var\(--pixel-skin-top-inset\);/s);
+-  assert.match(css, /\.terminal-card\[data-pixel-skin="true"\] \.terminal-card__surface\s*\{[^}]*inset:\s*calc\(var\(--pixel-skin-top-inset\) \+ var\(--card-header-height\)\)/s);
+-  assert.match(css, /\.terminal-card\[data-pixel-skin="true"\] \.terminal-card__search\s*\{[^}]*top:\s*calc\(var\(--pixel-skin-top-inset\) \+ var\(--card-header-height\) \+ 6px\);/s);
+-  assert.match(css, /\.terminal-card\[data-pixel-skin="true"\] \.terminal-skin-canvas\s*\{[^}]*z-index:\s*1;/s);
+-  assert.match(css, /\.terminal-card\[data-pixel-skin="true"\] \.terminal-card__header\s*\{[^}]*z-index:\s*4;/s);
++  assert.match(css, /:is\(\.terminal-card, \.plugin-canvas-card\)\[data-pixel-skin="true"\] \.terminal-card__surface\s*\{[^}]*z-index:\s*2;/s);
++  assert.match(css, /:is\(\.terminal-card, \.plugin-canvas-card\)\[data-pixel-skin="true"\] \.terminal-card__surface \.xterm-viewport\s*\{[^}]*scrollbar-width:\s*none;/s);
++  assert.match(css, /:is\(\.terminal-card, \.plugin-canvas-card\)\[data-pixel-skin="true"\]\s*\{[^}]*background:\s*transparent;/s);
++  assert.match(css, /:is\(\.terminal-card, \.plugin-canvas-card\)\[data-pixel-skin="true"\] \.terminal-card__header\s*\{[^}]*top:\s*var\(--pixel-skin-top-inset\);/s);
++  assert.match(css, /:is\(\.terminal-card, \.plugin-canvas-card\)\[data-pixel-skin="true"\] \.terminal-card__surface\s*\{[^}]*inset:\s*calc\(var\(--pixel-skin-top-inset\) \+ var\(--card-header-height\)\)/s);
++  assert.match(css, /:is\(\.terminal-card, \.plugin-canvas-card\)\[data-pixel-skin="true"\] \.terminal-card__search\s*\{[^}]*top:\s*calc\(var\(--pixel-skin-top-inset\) \+ var\(--card-header-height\) \+ 6px\);/s);
++  assert.match(css, /:is\(\.terminal-card, \.plugin-canvas-card\)\[data-pixel-skin="true"\] \.terminal-skin-canvas\s*\{[^}]*z-index:\s*1;/s);
++  assert.match(css, /:is\(\.terminal-card, \.plugin-canvas-card\)\[data-pixel-skin="true"\] \.terminal-card__header\s*\{[^}]*z-index:\s*4;/s);
+   assert.match(css, /--pixel-skin-top-inset/);
+   assert.match(css, /--pixel-skin-bottom-inset/);
+   assert.match(css, /\.terminal-card__skin-drag--top\s*\{[^}]*height:\s*var\(--pixel-skin-top-inset\);/s);
+-  assert.match(css, /\.terminal-card\[data-pixel-skin="true"\]\s*\{[^}]*outline:\s*none;/s);
+-  assert.match(css, /\.terminal-card\[data-pixel-skin="true"\] \.terminal-card__summary\s*\{[^}]*inset:\s*var\(--pixel-skin-top-inset\)/s);
++  assert.match(css, /:is\(\.terminal-card, \.plugin-canvas-card\)\[data-pixel-skin="true"\]\s*\{[^}]*outline:\s*none;/s);
++  assert.match(css, /:is\(\.terminal-card, \.plugin-canvas-card\)\[data-pixel-skin="true"\] \.terminal-card__summary\s*\{[^}]*inset:\s*var\(--pixel-skin-top-inset\)/s);
+   assert.match(card, /skinDetailLevel\(skinDetail, forceMasterDetail \|\| session\.role === "orchestrator"\)/);
+   assert.match(card, /pixelSkinSurfaceBounds\(pixelSkinTheme, pixelDetail, size\.width, size\.height, 26,\s*pixelPack\?\.apertures\[pixelDetail\] \?\? pixelPack\?\.aperture\)/);
+   assert.doesNotMatch(card, /pixelDetailRef|skinDetailLevel\([^)]*zoom|pixelDetail === "overview"/);
+@@ -163,7 +163,7 @@ test("master terminal openings keep output within the themed frame", async () =>
+   assert.match(card, /detail=\{pixelDetail\}/);
+   assert.match(card, /terminal-card__skin-drag--\$\{edge\}/);
+   assert.match(card, /\{!pixelControls && terminalActions\}[\s\S]*<Canvas2DSkinView[\s\S]*\{pixelControls && terminalActions\}/);
+-  assert.match(css, /\.terminal-card\[data-pixel-skin="true"\] \.terminal-card__actions--pixel\s*\{[^}]*z-index:\s*5;/s);
++  assert.match(css, /:is\(\.terminal-card, \.plugin-canvas-card\)\[data-pixel-skin="true"\] \.terminal-card__actions--pixel\s*\{[^}]*z-index:\s*5;/s);
+   const canvas = await readFile(new URL("../src/renderer/src/features/skins/Canvas2DSkinView.tsx", import.meta.url), "utf8");
+   assert.match(canvas, /data-overlay=\{transparentCenter\}/);
+   assert.match(canvas, /opaqueCenter && <canvas ref=\{frameRef\} className="terminal-skin-canvas terminal-skin-canvas--frame"/);
+diff --git a/tests/plugin-frame-visibility.test.mjs b/tests/plugin-frame-visibility.test.mjs
+index f43cd92..6a15bcc 100644
+--- a/tests/plugin-frame-visibility.test.mjs
++++ b/tests/plugin-frame-visibility.test.mjs
+@@ -217,7 +217,7 @@ test("the card suspends its frame while HOME editing, zoomed to a summary, off-s
+   const plugin = { manifest: { id: "com.example.probe", name: "Probe", permissions: [], contributions: [contribution] }, sourceUrl: "https://github.com/example/probe", selectedModules: [], enabled: true };
+   const props = (overrides = {}) => ({
+     instance: { id: "p1", pluginId: plugin.manifest.id, contributionId: "probe", title: "Probe", position: { x: 100, y: 100 }, size: { width: 680, height: 440 } },
+-    plugin, contribution, locale: "en", palette: "default", camera: cameraStore, stackIndex: 1, snapEnabled: false,
++    plugin, contribution, locale: "en", palette: "default", borderSkin: "classic", skinDetail: "minimal", camera: cameraStore, stackIndex: 1, snapEnabled: false,
+     sessions: [], limits: null, getSnapTargets: () => [], captureCanvasWheelOverWidgets: false,
+     onActivate() {}, onBoundsChange() {}, onDispose() {}, onOpenLauncher() {}, onError() {},
+     onWidgetFocus() {}, onWidgetHoverChange() {}, onCanvasWheel() {},
+@@ -252,6 +252,27 @@ test("the card suspends its frame while HOME editing, zoomed to a summary, off-s
+   __flush();
+   assert.deepEqual(render(), { suspended: false, lifecycle: "visible" }, "back on screen at once");
+ 
++  // A live preference change replaces only presentation, keeping the same iframe identity.
++  const gothic = __render(PluginCanvasCard, props({ borderSkin: "gothic-eclipse", skinDetail: "detailed" }));
++  assert.equal(gothic.props["data-border-skin"], "gothic-eclipse");
++  assert.equal(gothic.props["data-pixel-skin"], "true");
++  const artwork = findElement(gothic, (node) => node.props?.theme === "gothic-eclipse");
++  assert.equal(artwork.props.detail, "detailed");
++  assert.ok(artwork.props.surfaceBounds.left > 0);
++  const originalFrame = findElement(gothic, (node) => node.props && "canvasInstanceId" in node.props);
++  const minimal = __render(PluginCanvasCard, props({ borderSkin: "minimal" }));
++  assert.equal(minimal.props["data-border-skin"], "minimal");
++  assert.equal(minimal.props["data-pixel-skin"], undefined);
++  const changedFrame = findElement(minimal, (node) => node.props && "canvasInstanceId" in node.props);
++  assert.equal(changedFrame.type, originalFrame.type);
++  assert.equal(changedFrame.key, originalFrame.key);
++  const custom = __render(PluginCanvasCard, props({ borderSkin: "custom:aurora" }));
++  assert.equal(custom.props["data-custom-border-skin"], "custom:aurora");
++  const mascot = __render(PluginCanvasCard, props({ borderSkin: "gothic-eclipse", plugin: { ...plugin, sourceUrl: "mascot:fixture-project" } }));
++  assert.equal(mascot.props["data-border-skin"], undefined);
++  assert.equal(mascot.props["data-pixel-skin"], undefined);
++  assert.equal(findElement(mascot, (node) => node.props?.theme === "gothic-eclipse"), null);
++
+   visibility = "hidden";
+   assert.deepEqual(render(), { suspended: true, lifecycle: "suspended" }, "minimized window");
+ });
+diff --git a/tests/terminal-border-skins-renderer.test.mjs b/tests/terminal-border-skins-renderer.test.mjs
+index a662c9e..2a1710d 100644
+--- a/tests/terminal-border-skins-renderer.test.mjs
++++ b/tests/terminal-border-skins-renderer.test.mjs
+@@ -90,7 +90,8 @@ test("custom css is card-scoped and malformed styles fail closed", () => {
+     "custom:aurora"
+   );
+   assert.ok(css);
+-  assert.match(css, /^\.terminal-card\[data-custom-border-skin="custom:aurora"\] \{/);
++  assert.match(css, /^\.terminal-card\[data-custom-border-skin="custom:aurora"\], \.plugin-canvas-card\[data-custom-border-skin="custom:aurora"\] \{/);
++  assert.match(css, /\.plugin-canvas-card\[data-custom-border-skin="custom:aurora"\] \.terminal-card__header/);
+   assert.match(css, /\.terminal-card\[data-custom-border-skin="custom:aurora"\] \.terminal-card__header/);
+   assert.match(css, /\.terminal-card\[data-custom-border-skin="custom:aurora"\] \.output/);
+   assert.equal(scopeTerminalBorderSkinCss("@import url(https://example.test/x.css);", "custom:aurora"), null);
+-- 
+2.54.0
+
