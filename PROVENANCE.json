@@ -1,0 +1,94 @@
+{
+  "source": "https://music.deploychan.webcam",
+  "capturedAt": "2026-10-24T22:35:21.443063+00:00",
+  "upstreamHtmlSha256": "3a8199509616f2e912fc256d691979529dd0fe86a72bcec6fd9020002dca3cf0",
+  "adaptations": [
+    "External bootstrap scripts for host CSP",
+    "HTTPS media and image URLs",
+    "Direct audio output because upstream audio does not allow CORS",
+    "Host volume persistence and HOME launcher"
+  ],
+  "assets": [
+    {
+      "url": "https://music.deploychan.webcam/_next/static/chunks/0cz1d0mv5g_q7.js",
+      "sha256": "0973c1d64c88adc8e3c950410cb58b288f72118d5965b78049438deb8f2f9683",
+      "packagedSha256": "0973c1d64c88adc8e3c950410cb58b288f72118d5965b78049438deb8f2f9683"
+    },
+    {
+      "url": "https://music.deploychan.webcam/_next/static/chunks/0q5dyiymgbz_e.js",
+      "sha256": "24587e2ad3276e9919fc1a2b6444f5145ee8b854ea3bea22ec7661ff34a342ca",
+      "packagedSha256": "24587e2ad3276e9919fc1a2b6444f5145ee8b854ea3bea22ec7661ff34a342ca"
+    },
+    {
+      "url": "https://music.deploychan.webcam/_next/static/chunks/0un_b614r6vyu.js",
+      "sha256": "5a95d62a94334aea9d3a7ff1e3b197cd2b6a3b0fb9ff6238ecce317d5abff3b5",
+      "packagedSha256": "5a95d62a94334aea9d3a7ff1e3b197cd2b6a3b0fb9ff6238ecce317d5abff3b5"
+    },
+    {
+      "url": "https://music.deploychan.webcam/_next/static/chunks/158myu8e_yme3.js",
+      "sha256": "59d6d2186868625417737f3f33980e55f778eb3672cd03a10cf26b1259ca2314",
+      "packagedSha256": "59d6d2186868625417737f3f33980e55f778eb3672cd03a10cf26b1259ca2314"
+    },
+    {
+      "url": "https://music.deploychan.webcam/_next/static/chunks/1ds-rrzi0uoyt.js",
+      "sha256": "11bd904aa06b731b152a8dcb1b6cf1888d4df9dd9b6928a21476c59b573f345b",
+      "packagedSha256": "11bd904aa06b731b152a8dcb1b6cf1888d4df9dd9b6928a21476c59b573f345b"
+    },
+    {
+      "url": "https://music.deploychan.webcam/_next/static/chunks/1nayxq5odsbfw.js",
+      "sha256": "3faa39ce7e4f2afd9851816e8cbf1aa1095c98aa61c19b758dee508b71204f4d",
+      "packagedSha256": "3faa39ce7e4f2afd9851816e8cbf1aa1095c98aa61c19b758dee508b71204f4d"
+    },
+    {
+      "url": "https://music.deploychan.webcam/_next/static/chunks/26htxenn49gri.js",
+      "sha256": "3609cb63dd5605ffe6c2a8346ef7dd8d3f8e8590d8aeabc09ff6a304f0b6817b",
+      "packagedSha256": "3609cb63dd5605ffe6c2a8346ef7dd8d3f8e8590d8aeabc09ff6a304f0b6817b"
+    },
+    {
+      "url": "https://music.deploychan.webcam/_next/static/chunks/2nykiepra7i1k.js",
+      "sha256": "d3648d33d9b06994e5a2fb25db41dee5725f00e8b618c2edcf3dfd7344d66e02",
+      "packagedSha256": "d3648d33d9b06994e5a2fb25db41dee5725f00e8b618c2edcf3dfd7344d66e02"
+    },
+    {
+      "url": "https://music.deploychan.webcam/_next/static/chunks/3m4a-5-bzd01p.css",
+      "sha256": "8d8c756c442fee49ecff2ee8d3e519bf384c402594e2985827439e3f273ca1ac",
+      "packagedSha256": "c0030bfdf6bdf9195404e3d3f43d8aef759a19af5c6761d2dd60363d82d0a011"
+    },
+    {
+      "url": "https://music.deploychan.webcam/_next/static/chunks/3mfta0775jfyn.js",
+      "sha256": "95006610bf38eed72d6a3a63c3ad8dfea5edeb8169311981acc8b917873d4fa4",
+      "packagedSha256": "95006610bf38eed72d6a3a63c3ad8dfea5edeb8169311981acc8b917873d4fa4"
+    },
+    {
+      "url": "https://music.deploychan.webcam/_next/static/chunks/3u0527crgji5y.js",
+      "sha256": "355fa070090ec92a9e0304467d85d3fabc7c2692012f8b058d26e6761c511347",
+      "packagedSha256": "355fa070090ec92a9e0304467d85d3fabc7c2692012f8b058d26e6761c511347"
+    },
+    {
+      "url": "https://music.deploychan.webcam/_next/static/chunks/44u804shawnd9.js",
+      "sha256": "2cf94a59853f0c51b20311fd02c31890cecf3c1fefb7a171e805ec714f948e56",
+      "packagedSha256": "2cf94a59853f0c51b20311fd02c31890cecf3c1fefb7a171e805ec714f948e56"
+    },
+    {
+      "url": "https://music.deploychan.webcam/_next/static/chunks/kisa-playlists-c0539abf42b0ff8c.js",
+      "sha256": "c0539abf42b0ff8c78065f5cf1dd4e839c6e1b803bde243b623676c26d7a520b",
+      "packagedSha256": "ca09fd14b1ff4b1fc74aca82cac92a26dfa6aa505c329350433da1979c9e11e6"
+    },
+    {
+      "url": "https://music.deploychan.webcam/_next/static/chunks/turbopack-03a-d-80y9kvz.js",
+      "sha256": "59a6bb92c19d6a48dfc9425ae8c1aad6318e066accf8b7d656dc26e495ea20a0",
+      "packagedSha256": "59a6bb92c19d6a48dfc9425ae8c1aad6318e066accf8b7d656dc26e495ea20a0"
+    },
+    {
+      "url": "https://music.deploychan.webcam/fonts/IBMPlexMono-Regular.woff2",
+      "sha256": "780bf89351e7d49635af1e01cbd5624a4ddaf0304fe4af3cf382e1394210f3bb",
+      "packagedSha256": "780bf89351e7d49635af1e01cbd5624a4ddaf0304fe4af3cf382e1394210f3bb"
+    },
+    {
+      "url": "https://music.deploychan.webcam/fonts/SpaceGrotesk-Cyr.woff2",
+      "sha256": "0d62ee5d9b295fc55cd5541d2ad51997b2c8c3d15ed5669ba8938c4b423de436",
+      "packagedSha256": "0d62ee5d9b295fc55cd5541d2ad51997b2c8c3d15ed5669ba8938c4b423de436"
+    }
+  ],
+  "redistribution": "Upstream music is streamed and is not included. Upstream assets retain their original ownership and are not relicensed by this integration. See THIRD_PARTY_NOTICES.md."
+}

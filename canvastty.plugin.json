@@ -1,0 +1,42 @@
+{
+  "apiVersion": 1,
+  "id": "webcam.deploychan.music",
+  "name": "Canvas Player",
+  "version": "1.0.0",
+  "description": "Плеер music.deploychan.webcam в отдельном окне CanvasTTY. Музыка загружается с исходного сайта.",
+  "platforms": [
+    "canvastty"
+  ],
+  "minHostVersion": "1.8.1",
+  "icon": "icon.svg",
+  "permissions": [
+    "network",
+    "storage"
+  ],
+  "contributions": [
+    {
+      "id": "player",
+      "kind": "window",
+      "title": "Canvas Player",
+      "entry": "index.html",
+      "defaultSize": {
+        "width": 1100,
+        "height": 760
+      },
+      "minSize": {
+        "width": 380,
+        "height": 560
+      }
+    },
+    {
+      "id": "launcher",
+      "kind": "home-widget",
+      "title": "Canvas Player",
+      "entry": "launcher.html",
+      "defaultSize": {
+        "columns": 4,
+        "rows": 2
+      }
+    }
+  ]
+}
