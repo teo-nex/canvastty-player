@@ -7,13 +7,20 @@
 ## Установка
 
 1. В CanvasTTY откройте **Настройки → Плагины**.
-2. Вставьте `https://github.com/teo-nex/canvastty-player`.
+2. Вставьте `https://github.com/teo-nex/canvastty-plugin-player`.
 3. Нажмите **Проверить → Установить**.
 4. У плагина **Canvas Player** нажмите **Открыть**.
 
 Переключатель **Включить / Выключить** управляет плагином. Выключение закрывает
 его поверхность и останавливает музыку. Плитку запуска можно добавить в
 **Оформление → Состав HOME**.
+
+## Библиотека плагинов
+
+CanvasTTY собирает витрину через поиск публичных GitHub-репозиториев,
+содержащих `canvastty-plugin` в названии. Отдельный PR для включения не нужен.
+Репозиторий называется `canvastty-plugin-player`; поиск в CanvasTTY — `player`.
+См. [реализацию витрины](https://github.com/howdeploy/CanvasTTY/blob/main/src/main/services/PluginManager.ts).
 
 ## Возможности
 
